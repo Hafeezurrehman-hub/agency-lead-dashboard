@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>Admin Panel | Subscriptions</title>
+<style>
+:root{--bg:#f5f6f8;--card:#fff;--tx:#14171c;--mu:#6b7280;--bd:#e3e6ea;--ac:#0f766e;--ok:#15803d;--tr:#b45309;--ex:#b91c1c;--pa:#6b7280;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);color-scheme:light}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1216;--card:#181c22;--tx:#eceff3;--mu:#98a1ad;--bd:#2a3039;--ac:#2dd4bf;--ok:#4ade80;--tr:#fbbf24;--ex:#f87171;--pa:#98a1ad;color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.wrap{max-width:760px;margin:0 auto;padding:16px}
+h1{font-size:20px;margin:0}
+.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:8px}
+.sum{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}
+.s{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:10px;text-align:center}
+.s b{display:block;font-size:20px}.s span{font-size:12px;color:var(--mu)}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:14px;margin-bottom:10px}
+.row{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+.nm{font-weight:650}.sub{color:var(--mu);font-size:13px}
+.pill{font-size:12px;font-weight:650;padding:3px 10px;border-radius:99px;border:1px solid currentColor;white-space:nowrap}
+.Active{color:var(--ok)}.Trial{color:var(--tr)}.Expired{color:var(--ex)}.Paused,.Other{color:var(--pa)}
+.due{margin:8px 0;font-size:14px}
+.btns{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+button{font:inherit;font-size:13px;border:1px solid var(--bd);background:var(--card);color:var(--tx);border-radius:9px;padding:8px 11px;cursor:pointer}
+button.p{background:var(--ac);border-color:var(--ac);color:#fff;font-weight:650}
+@media (prefers-color-scheme:dark){button.p,.msg{color:#06231f}}
+button.c{border-color:var(--ex);color:var(--ex)}
+button:disabled{opacity:.5}
+input{font:inherit;width:100%;padding:11px;border-radius:10px;border:1px solid var(--bd);background:var(--card);color:var(--tx);margin:8px 0}
+.login{max-width:380px;margin:12vh auto 0}
+.msg{position:sticky;top:calc(env(safe-area-inset-top,0px) + 6px);z-index:11;background:var(--ac);color:#fff;padding:9px 12px;border-radius:10px;margin-bottom:10px;font-size:14px}
+.msg.e{background:var(--ex);color:#fff}
+.mu{color:var(--mu);font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+<script>
+// Your n8n webhook URL (Subscription Admin API workflow, path: subscription-admin)
+var API = "https://n8n-production-7ac49.up.railway.app/webhook/subscription-admin";
+
+var token = "", data = null, msg = null, busy = false, armed = "", filter = "all";
+var app = document.getElementById("app");
+
+function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
+
+function call(body){
+  return fetch(API,{method:"POST",headers:{"Content-Type":"application/json","X-Admin-Token":token},body:JSON.stringify(body)})
+    .then(function(r){
+      if(r.status===403||r.status===401){throw new Error("Wrong token")}
+      if(!r.ok){throw new Error("Server error ("+r.status+")")}
+      return r.json();
+    });
+}
+
+function netError(e){return e.message==="Failed to fetch"?"Could not reach the server":e.message}
+
+function load(){
+  busy=true;draw();
+  call({action:"list"}).then(function(d){
+    busy=false;
+    if(d.ok){data=d}else{token="";msg={e:1,t:d.error||"Something went wrong"}}
+    draw();
+  }).catch(function(e){busy=false;token="";msg={e:1,t:netError(e)};draw()});
+}
+
+function doneText(a,id,d){
+  var c=(d.clients||[]).filter(function(x){return x.id===id})[0]||{};
+  if(a==="payment")return "Payment recorded. Active until "+c.due;
+  if(a==="start_trial")return "10-day trial started. Ends "+c.due;
+  if(a==="extend")return "Extended by 3 days. New date: "+c.due;
+  if(a==="pause")return "Client paused";
+  if(a==="expire")return "Client switched off (Expired)";
+  return "Done";
+}
+
+function act(a,id,extra){
+  var k=a+id;
+  if((a==="expire"||a==="pause")&&armed!==k){armed=k;draw();return}
+  armed="";busy=true;draw();
+  call(Object.assign({action:a,client_id:id},extra||{})).then(function(d){
+    busy=false;
+    if(d.ok){data=d;msg={t:doneText(a,id,d)}}else{msg={e:1,t:d.error||"Something went wrong"}}
+    draw();
+    setTimeout(function(){msg=null;draw()},4000);
+  }).catch(function(e){busy=false;msg={e:1,t:netError(e)};draw()});
+}
+
+function dueText(c){
+  if(c.days_left===null||!c.due)return "No date set";
+  var d=c.days_left;
+  if(c.status==="Expired"||c.status==="Paused")return "Last date: "+c.due;
+  if(d<0)return c.due+" ("+(-d)+" day"+(d===-1?"":"s")+" overdue)";
+  if(d===0)return c.due+" (today)";
+  return c.due+" ("+d+" day"+(d===1?"":"s")+" left)";
+}
+
+function btn(label,a,id,cls,extra){
+  var k=a+id,t=armed===k?"Sure?":label;
+  return '<button class="'+(armed===k?"c":cls||"")+'" '+(busy?"disabled":"")+' data-a="'+a+'" data-i="'+esc(id)+'" '+(extra?'data-x="'+esc(extra)+'"':"")+'>'+t+'</button>';
+}
+
+function draw(){
+  if(!token){
+    app.innerHTML='<div class="login card"><h1>Admin Panel</h1><p class="mu">Enter your admin token. It is kept only in this page\u2019s memory.</p>'+(msg?'<div class="msg e">'+esc(msg.t)+'</div>':'')+'<input id="tk" type="password" placeholder="Admin token" autocomplete="off"><button class="p" id="go">Sign in</button></div>';
+    document.getElementById("go").onclick=function(){token=document.getElementById("tk").value.trim();msg=null;if(token)load()};
+    document.getElementById("tk").onkeydown=function(e){if(e.key==="Enter")document.getElementById("go").click()};
+    return;
+  }
+  if(!data){app.innerHTML='<p class="mu">Loading\u2026</p>';return}
+  var s=data.summary,h='<div class="top"><h1>Subscriptions</h1><div><button id="rf">Refresh</button> <button id="lo">Log out</button></div></div>';
+  if(msg)h+='<div class="msg'+(msg.e?" e":"")+'">'+esc(msg.t)+'</div>';
+  h+='<div class="sum"><div class="s"><b>'+s.active+'</b><span>Active</span></div><div class="s"><b>'+s.trial+'</b><span>Trial</span></div><div class="s"><b>'+s.expired+'</b><span>Expired</span></div><div class="s"><b>'+(s.mrr/1000)+'k</b><span>Monthly PKR</span></div></div>';
+  var fl=["all","Trial","Active","Expired"];
+  h+='<div class="btns" style="margin:0 0 12px">'+fl.map(function(f){return '<button data-f="'+f+'" class="'+(filter===f?"p":"")+'">'+(f==="all"?"All":f)+'</button>'}).join("")+'</div>';
+  var list=data.clients.filter(function(c){return filter==="all"||c.status===filter});
+  if(!list.length)h+='<p class="mu">No clients in this filter.</p>';
+  list.forEach(function(c){
+    var cl=["Active","Trial","Expired","Paused"].indexOf(c.status)>-1?c.status:"Other";
+    var idle=["","Setup","Test","Expired","Paused"].indexOf(c.status)>-1;
+    h+='<div class="card"><div class="row"><div><div class="nm">'+esc(c.name||c.id)+'</div><div class="sub">'+esc(c.id)+' \u00b7 '+esc(c.owner)+' \u00b7 '+esc(c.phone)+'</div></div><span class="pill '+cl+'">'+esc(c.status||"Setup")+'</span></div>'+
+    '<div class="due">'+(c.status==="Trial"?"Trial ends: ":c.status==="Active"?"Next payment: ":"")+esc(dueText(c))+(c.fee?' \u00b7 PKR '+c.fee:"")+'</div><div class="btns">'+
+    btn("Payment Received","payment",c.id,"p")+
+    (idle?btn("Start 10-day Trial","start_trial",c.id):"")+
+    btn("+3 days","extend",c.id,"",3)+
+    (c.status!=="Paused"?btn("Pause","pause",c.id):"")+
+    (c.status!=="Expired"?btn("Switch off","expire",c.id):"")+
+    '</div></div>';
+  });
+  app.innerHTML=h;
+  document.getElementById("rf").onclick=load;
+  document.getElementById("lo").onclick=function(){token="";data=null;msg=null;draw()};
+}
+
+app.addEventListener("click",function(e){
+  var t=e.target.closest("button");if(!t)return;
+  if(t.dataset.f){filter=t.dataset.f;draw();return}
+  if(t.dataset.a){act(t.dataset.a,t.dataset.i,t.dataset.x?{days:Number(t.dataset.x)}:null)}
+});
+draw();
+</script>
+</body>
+</html>
