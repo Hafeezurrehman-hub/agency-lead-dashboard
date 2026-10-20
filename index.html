@@ -40,6 +40,10 @@ input{font:inherit;width:100%;padding:11px;border-radius:10px;border:1px solid v
 .msg{position:sticky;top:calc(env(safe-area-inset-top,0px) + 6px);z-index:11;background:var(--ac);color:#fff;padding:9px 12px;border-radius:10px;margin-bottom:10px;font-size:14px}
 .msg.e{background:var(--ex);color:#fff}
 .mu{color:var(--mu);font-size:13px}
+.ov{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px;z-index:20}
+.md{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:16px;max-width:420px;width:100%}
+.md h2{margin:0 0 8px;font-size:17px;color:var(--ex)}
+button.d{background:var(--ex);border-color:var(--ex);color:#fff;font-weight:650}
 </style>
 </head>
 <body>
@@ -48,7 +52,7 @@ input{font:inherit;width:100%;padding:11px;border-radius:10px;border:1px solid v
 // Your n8n webhook URL (Subscription Admin API workflow, path: subscription-admin)
 var API = "https://n8n-production-7ac49.up.railway.app/webhook/subscription-admin";
 
-var token = "", data = null, msg = null, busy = false, armed = "", filter = "all";
+var token = "", data = null, msg = null, busy = false, armed = "", filter = "all", delTarget = null;
 var app = document.getElementById("app");
 
 function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
@@ -80,6 +84,7 @@ function doneText(a,id,d){
   if(a==="extend")return "Extended by 3 days. New date: "+c.due;
   if(a==="pause")return "Client paused";
   if(a==="expire")return "Client switched off (Expired)";
+  if(a==="delete")return "Client deleted: "+id+". A backup was emailed to you.";
   return "Done";
 }
 
@@ -134,9 +139,19 @@ function draw(){
     btn("+3 days","extend",c.id,"",3)+
     (c.status!=="Paused"?btn("Pause","pause",c.id):"")+
     (c.status!=="Expired"?btn("Switch off","expire",c.id):"")+
+    btn("Delete","ask_delete",c.id,"c")+
     '</div></div>';
   });
+  if(delTarget){
+    h+='<div class="ov"><div class="md"><h2>Delete this client?</h2><p><b>'+esc(delTarget.name||delTarget.id)+'</b> ('+esc(delTarget.id)+') will be permanently removed from your clients sheet. All automations for this client stop. A backup of the row is emailed to you.</p><p class="mu">Their own Google Sheet, calendar and WhatsApp/Meta setup are not deleted.'+(delTarget.status==="Active"?' <b>This client is currently Active (paid).</b>':'')+'</p><p class="mu">Type <b>'+esc(delTarget.id)+'</b> to confirm:</p><input id="dcf" autocomplete="off" placeholder="'+esc(delTarget.id)+'"><div class="btns"><button id="dcx">Cancel</button><button class="d" id="ddo" disabled>Delete forever</button></div></div></div>';
+  }
   app.innerHTML=h;
+  if(delTarget){
+    var inp=document.getElementById("dcf"),go=document.getElementById("ddo");
+    inp.oninput=function(){go.disabled=busy||inp.value.trim()!==delTarget.id};
+    document.getElementById("dcx").onclick=function(){delTarget=null;draw()};
+    go.onclick=function(){var id=delTarget.id;delTarget=null;act("delete",id,{confirm:inp.value.trim()})};
+  }
   document.getElementById("rf").onclick=load;
   document.getElementById("lo").onclick=function(){token="";data=null;msg=null;draw()};
 }
@@ -144,6 +159,7 @@ function draw(){
 app.addEventListener("click",function(e){
   var t=e.target.closest("button");if(!t)return;
   if(t.dataset.f){filter=t.dataset.f;draw();return}
+  if(t.dataset.a==="ask_delete"){delTarget=data.clients.filter(function(c){return c.id===t.dataset.i})[0]||null;draw();return}
   if(t.dataset.a){act(t.dataset.a,t.dataset.i,t.dataset.x?{days:Number(t.dataset.x)}:null)}
 });
 draw();
